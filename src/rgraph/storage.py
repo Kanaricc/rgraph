@@ -3,7 +3,7 @@
 from contextlib import asynccontextmanager
 
 from tortoise import Tortoise, connections
-from tortoise.expressions import Q
+from tortoise.expressions import F, Q
 from tortoise.transactions import in_transaction
 
 from .models import Edge, Node
@@ -95,7 +95,7 @@ class Graph:
         async with in_transaction() as db:
             if write:
                 # Acquire SQLite's write reservation before graph validation.
-                await Node.filter(id=-1).using_db(db).update(id=-1)
+                await Node.filter(id=-1).using_db(db).update(text=F("text"))
             yield
 
     async def node(self, node_id):
