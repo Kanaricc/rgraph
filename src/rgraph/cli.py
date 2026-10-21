@@ -208,9 +208,17 @@ def render_tree(data, depth):
         node = nodes[node_id]
         print(f"{prefix}{connector}[{node_id}] {preview(node['text'])}  "
               f"value={number(node['value'])}  subtree={number(node['subtree_value'])}")
+        child_prefix = prefix + ("    " if connector == "└── " else "│   " if connector else "")
+        conclusion = node["conclusion"]
+        if conclusion is None:
+            print(child_prefix + "Conclusion: 尚未形成结论")
+        else:
+            lines = conclusion.splitlines()
+            print(child_prefix + "Conclusion: " + lines[0])
+            for line in lines[1:]:
+                print(child_prefix + "            " + line)
         if depth is not None and level >= depth:
             continue
-        child_prefix = prefix + ("    " if connector == "└── " else "│   " if connector else "")
         children = outgoing.get(node_id, [])
         for index in range(len(children) - 1, -1, -1):
             edge = children[index]
@@ -244,10 +252,11 @@ def render(result, args):
             for edge in result[key]:
                 print(f"{edge['parent_id']} -> {edge['child_id']}\n{edge_text(edge)}")
     elif command == "list":
-        print("ID\tVALUE\tSUBTREE\tSCORED/TOTAL\tTEXT")
+        print("ID\tVALUE\tSUBTREE\tSCORED/TOTAL\tTEXT\tCONCLUSION")
         for node in result:
+            conclusion = preview(node["conclusion"]) if node["conclusion"] is not None else "尚未形成结论"
             print(f"{node['id']}\t{number(node['value'])}\t{number(node['subtree_value'])}\t"
-                  f"{node['scored_descendant_count']}/{node['descendant_count']}\t{preview(node['text'])}")
+                  f"{node['scored_descendant_count']}/{node['descendant_count']}\t{preview(node['text'])}\t{conclusion}")
     elif command == "search":
         for match in result:
             label = str(match["id"]) if match["type"] == "node" else f"{match['parent_id']} -> {match['child_id']}"

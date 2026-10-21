@@ -10,7 +10,7 @@ OVERVIEW = """用 SQLite 保存研究 DAG，通过文本节点和带 observation
   rgraph append 1 --text "实验结果：样本量不足"
   rgraph set-conclusion 1 --text "当前结果需要更多样本验证"
   rgraph set-code-dir 1 ./experiments/baseline
-  rgraph set-value 1 0.4
+  # 价值由用户人工评估；Agent 禁止自行调用 set-value / clear-value。
   rgraph add --parent 1 --observation "样本量不足" --action "扩大样本量" --text "下一轮计划"
   rgraph tree
   rgraph --json show 1
@@ -21,8 +21,11 @@ OVERVIEW = """用 SQLite 保存研究 DAG，通过文本节点和带 observation
     写入目录和展开父节点时均检查目录及 README，缺失则报错。
   * 边的 observation 是观测原因，action 是后续动作；创建时两项必填且非空。
   * 允许分支、汇合；禁止自连接、重复边和环。多父节点用 link 补充入边。
-  * value 只能后续 set-value，范围 [0,1]；未评估为 null，与 0 不同。
+  * value 由用户人工评估；set-value / clear-value 仅供用户使用，禁止 Agent 自行调用。
+    Agent 不得自行评分、调整或清除评分；可以读取已有价值。
+    value 范围 [0,1]；未评估为 null，与 0 不同。
     subtree 是已评估可达后代的均值，不含自身、共享后代去重，无值为 null。
+    价值及子树均值不代表结论可信度或下一轮试错优先级。
 
 输入与自动化：
   --text / --file 二选一，文件使用 UTF-8；--file - 读取标准输入。
@@ -98,7 +101,8 @@ COMMANDS = {
 示例：
   rgraph set-code-dir 1 ./experiments/baseline
 """),
-    "set-value": ("后续人工评估节点价值，覆盖原值。", """VALUE 必须是 [0,1] 内的有限数，拒绝 NaN、无穷大和越界值（退出码 2）。
+    "set-value": ("仅供用户人工评估节点价值；禁止 Agent 自行调用。", """仅供用户使用。禁止 Agent 自行调用本命令评分或调整评分。
+VALUE 必须是 [0,1] 内的有限数，拒绝 NaN、无穷大和越界值（退出码 2）。
 0 表示已评估且价值为零；未评估为 null，用 clear-value 恢复。
 无需先填结论和目录；value 也不是展开父节点的必要条件。
 子树值查询时计算，不可手动设置。默认输出 OK ID；--json 返回节点详情。
@@ -106,7 +110,8 @@ COMMANDS = {
 示例：
   rgraph set-value 2 0.8
 """),
-    "clear-value": ("将节点价值恢复为未评估（null）。", """不删除节点，不修改结论、目录、文本或边。
+    "clear-value": ("仅供用户清除价值评估；禁止 Agent 自行调用。", """仅供用户使用。禁止 Agent 自行调用本命令清除评分。
+将节点价值恢复为未评估（null）。不删除节点，不修改结论、目录、文本或边。
 未评估节点不参与祖先的子树均值，但仍遍历其后代。
 默认输出 OK ID；--json 返回更新后的节点详情。
 
@@ -125,8 +130,9 @@ scored_descendant_count，以及 incoming/outgoing 边数组。
   rgraph show 2 --text-only > node.md
 """),
     "list": ("筛选并排序节点，查看价值和研究记录摘要。", """默认列出全部节点，按 ID 升序。多个筛选条件同时生效。
-表格列：ID、VALUE、SUBTREE、SCORED/TOTAL、TEXT。
-TEXT 为首个非空行，最多 60 字符；完整内容用 show。
+表格列：ID、VALUE、SUBTREE、SCORED/TOTAL、TEXT、CONCLUSION。
+TEXT 和 CONCLUSION 为首个非空行摘要，最多 60 字符；完整内容用 show。
+未设置结论显示“尚未形成结论”。
 未评估价值排序时始终放最后；SCORED/TOTAL 为已评估后代数/后代总数。
 --json 返回完整节点对象数组，包含结论、目录和价值统计，不含相邻边。
 
@@ -148,20 +154,23 @@ TEXT 为首个非空行，最多 60 字符；完整内容用 show。
     "tree": ("将研究 DAG 按树形缩进展开，显示边的观测与动作。", """省略 ID 时从全部根节点展开；指定 ID 时只展开该节点及后续。
 根和子节点按 ID 升序。每条边完整显示 Observation / Action；节点行显示
 [ID]、文本首个非空行摘要（最多 60 字符）、value 和 subtree。
+节点下方完整显示 Conclusion，保留换行；未设置时显示“尚未形成结论”。
 共享节点首次出现时展开，后续显示 [ID] ↩，表示引用同一节点，不是环。
 深度以边数计算，起点为 0；--depth 0 只显示起点，不指定则完整展开。
 共享节点的深度限制按首次遇到的路径应用。
 subtree 是全部已评估可达后代的平均价值，不含自身、共享后代去重，
 未评估节点不参与均值但仍遍历其后代；无已评估后代显示 —（JSON null）。
-显示深度不影响价值计算。终端不展示结论/目录，详情用 show。
+显示深度不影响价值计算。终端不展示实验目录，详情用 show。
 --json 返回 roots（起点 ID）、nodes（完整节点及价值统计）、edges；
 共享节点去重，由多条边引用；不使用 ↩ 字符。
 
 输出示意：
   [1] 基线研究  value=0.4  subtree=0.8
+  Conclusion: 当前结果需要更多样本验证
   └── Observation: 样本不足
       Action: 扩大样本
       └── [2] 扩样实验  value=0.8  subtree=—
+          Conclusion: 扩大样本后效果仍然稳定
 
 示例：
   rgraph tree
