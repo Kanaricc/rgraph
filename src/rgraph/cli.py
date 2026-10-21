@@ -64,10 +64,18 @@ def parser():
     text_options(add)
     add.add_argument("--parent", type=int)
     edge_options(add)
+    add.add_argument("--conclusion", help="研究结论，可后续设置")
+    add.add_argument("--code-dir", help="实验代码目录，根部必须有 README")
     for name in ("edit", "append"):
         p = commands.add_parser(name, help="替换节点文本" if name == "edit" else "追加节点文本")
         p.add_argument("id", type=int)
         text_options(p)
+    p = commands.add_parser("set-conclusion", help="设置节点结论")
+    p.add_argument("id", type=int)
+    text_options(p)
+    p = commands.add_parser("set-code-dir", help="设置实验代码目录并检查复现 README")
+    p.add_argument("id", type=int)
+    p.add_argument("path", help="实验代码目录")
     p = commands.add_parser("set-value", help="设置节点价值")
     p.add_argument("id", type=int)
     p.add_argument("value", type=coefficient)
@@ -120,9 +128,14 @@ def read_text(args):
 async def execute(graph, args):
     command = args.command
     if command == "add":
-        return await graph.add(read_text(args), args.parent, args.observation, args.action)
+        return await graph.add(read_text(args), args.parent, args.observation, args.action,
+                               conclusion=args.conclusion, code_dir=args.code_dir)
     if command in ("edit", "append"):
         return await graph.update_text(read_text(args), node_id=args.id, append=command == "append")
+    if command == "set-conclusion":
+        return await graph.set_conclusion(args.id, read_text(args))
+    if command == "set-code-dir":
+        return await graph.set_code_dir(args.id, args.path)
     if command in ("set-value", "clear-value"):
         return await graph.set_value(args.id, args.value if command == "set-value" else None)
     if command == "show":
@@ -210,7 +223,9 @@ def render(result, args):
         print(f"Descendants scored: {result['scored_descendant_count']} / {result['descendant_count']}")
         print(f"Created:            {result['created_at']}")
         print(f"Updated:            {result['updated_at']}")
+        print(f"Code directory:     {result['code_dir'] if result['code_dir'] is not None else '—'}")
         print("\nText:\n" + result["text"])
+        print("\nConclusion:\n" + (result["conclusion"] if result["conclusion"] is not None else "—"))
         for label, key in (("Incoming", "incoming"), ("Outgoing", "outgoing")):
             print(f"\n{label}:")
             for edge in result[key]:
@@ -240,7 +255,7 @@ def normalize_globals(argv):
     """Accept --db and --json before or after subcommands, preserving text arguments."""
     leading, trailing = [], []
     # Skip values belonging to text options even when they resemble global flags.
-    value_options = {"--text", "--file", "--observation", "--action", "--parent", "--sort", "--limit", "--depth", "--in"}
+    value_options = {"--text", "--file", "--observation", "--action", "--conclusion", "--code-dir", "--parent", "--sort", "--limit", "--depth", "--in"}
     i = 0
     while i < len(argv):
         token = argv[i]
@@ -270,7 +285,7 @@ async def run_command(args):
         return await Graph.initialize(args.db)
     graph = await Graph.open(args.db)
     try:
-        write = args.command in {"add", "edit", "append", "set-value", "clear-value", "link", "unlink", "rm"} or (
+        write = args.command in {"add", "edit", "append", "set-value", "clear-value", "set-conclusion", "set-code-dir", "link", "unlink", "rm"} or (
             args.command == "edge" and args.edge_command != "show")
         async with graph.transaction(write):
             return await execute(graph, args)

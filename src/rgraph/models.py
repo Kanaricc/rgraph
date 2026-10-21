@@ -6,6 +6,8 @@ from tortoise import fields, models
 class Node(models.Model):
     id = fields.IntField(primary_key=True)
     text = fields.TextField()
+    conclusion = fields.TextField(null=True)
+    code_dir = fields.TextField(null=True)
     value = fields.FloatField(null=True)
     created_at = fields.TextField()
     updated_at = fields.TextField()
