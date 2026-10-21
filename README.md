@@ -72,7 +72,7 @@ rm ID
 export
 ```
 
-全局参数也可放在子命令后。各命令支持 `--help`，版本使用 `--version`。
+全局参数也可放在子命令后。`rgraph --help` 包含完整起步流程、图约束及自动化约定；每个命令（包括 `edge show/edit/append`）的 `--help` 提供前置条件、参数、输出和示例。版本使用 `--version`。
 
 ### 文本输入
 

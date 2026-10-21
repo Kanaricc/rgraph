@@ -10,10 +10,15 @@ from pathlib import Path
 from tortoise.exceptions import BaseORMException
 
 from . import __version__
+from .helptext import COMMANDS, EDGE_COMMANDS, GLOBAL_NOTE, OVERVIEW
 from .storage import Graph, GraphError
 
 
 class Parser(argparse.ArgumentParser):
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("formatter_class", argparse.RawDescriptionHelpFormatter)
+        super().__init__(*args, **kwargs)
+
     def error(self, message):
         raise GraphError("invalid_arguments", message, 2)
 
@@ -54,7 +59,7 @@ def edge_text(edge):
 
 
 def parser():
-    root = Parser(description="SQLite 文本研究 DAG")
+    root = Parser(prog="rgraph", description="管理研究 DAG：文本节点、实验结论与代码目录，以及观测/动作边。", epilog=OVERVIEW)
     root.add_argument("--db", default="research.db", help="数据库路径，默认 research.db")
     root.add_argument("--json", action="store_true", help="输出 JSON")
     root.add_argument("--version", action="version", version=f"rgraph {__version__}")
@@ -62,57 +67,65 @@ def parser():
     commands.add_parser("init", help="初始化数据库")
     add = commands.add_parser("add", help="创建节点及可选父边")
     text_options(add)
-    add.add_argument("--parent", type=int)
+    add.add_argument("--parent", type=int, help="已有父节点 ID；非空图必填，父节点须补齐结论和实验目录")
     edge_options(add)
     add.add_argument("--conclusion", help="研究结论，可后续设置")
     add.add_argument("--code-dir", help="实验代码目录，根部必须有 README")
     for name in ("edit", "append"):
         p = commands.add_parser(name, help="替换节点文本" if name == "edit" else "追加节点文本")
-        p.add_argument("id", type=int)
+        p.add_argument("id", type=int, help="已有节点的整数 ID")
         text_options(p)
     p = commands.add_parser("set-conclusion", help="设置节点结论")
-    p.add_argument("id", type=int)
+    p.add_argument("id", type=int, help="已有节点的整数 ID")
     text_options(p)
     p = commands.add_parser("set-code-dir", help="设置实验代码目录并检查复现 README")
-    p.add_argument("id", type=int)
+    p.add_argument("id", type=int, help="已有节点的整数 ID")
     p.add_argument("path", help="实验代码目录")
     p = commands.add_parser("set-value", help="设置节点价值")
-    p.add_argument("id", type=int)
-    p.add_argument("value", type=coefficient)
+    p.add_argument("id", type=int, help="已有节点的整数 ID")
+    p.add_argument("value", type=coefficient, help="人工价值系数：[0,1] 内的有限数")
     p = commands.add_parser("clear-value", help="清除节点价值")
-    p.add_argument("id", type=int)
+    p.add_argument("id", type=int, help="已有节点的整数 ID")
     p = commands.add_parser("show", help="查看节点及相邻边")
-    p.add_argument("id", type=int)
-    p.add_argument("--text-only", action="store_true")
+    p.add_argument("id", type=int, help="已有节点的整数 ID")
+    p.add_argument("--text-only", action="store_true", help="仅输出原始 text，无附加换行；与 --json 互斥")
     p = commands.add_parser("list", help="列出节点")
-    p.add_argument("--roots", action="store_true")
-    p.add_argument("--unscored", action="store_true")
-    p.add_argument("--sort", choices=("id", "value", "subtree-value", "updated"), default="id")
-    p.add_argument("--desc", action="store_true")
-    p.add_argument("--limit", type=nonnegative)
+    p.add_argument("--roots", action="store_true", help="仅列出没有入边的节点")
+    p.add_argument("--unscored", action="store_true", help="仅列出 value 为 null 的未评估节点")
+    p.add_argument("--sort", choices=("id", "value", "subtree-value", "updated"), default="id", help="排序依据，默认 id；空价值始终排最后")
+    p.add_argument("--desc", action="store_true", help="按所选依据降序排列")
+    p.add_argument("--limit", type=nonnegative, help="最多返回多少节点；非负整数，默认全部")
     p = commands.add_parser("search", help="字面子串搜索，区分大小写")
-    p.add_argument("query")
-    p.add_argument("--in", dest="scope", choices=("nodes", "edges", "all"), default="all")
+    p.add_argument("query", help="区分大小写的字面子串")
+    p.add_argument("--in", dest="scope", choices=("nodes", "edges", "all"), default="all", help="搜索范围，默认 all")
     p = commands.add_parser("tree", help="查看后续图结构")
-    p.add_argument("id", type=int, nargs="?")
-    p.add_argument("--depth", type=nonnegative)
+    p.add_argument("id", type=int, nargs="?", help="展开起点 ID；省略则从所有根节点开始")
+    p.add_argument("--depth", type=nonnegative, help="最大边数深度；0 仅起点，默认无限制")
     for name in ("link", "unlink"):
         p = commands.add_parser(name, help="连接节点" if name == "link" else "移除边")
-        p.add_argument("parent", type=int)
-        p.add_argument("child", type=int)
+        p.add_argument("parent", type=int, help="边的来源节点 ID")
+        p.add_argument("child", type=int, help="边的目标节点 ID")
         if name == "link":
             edge_options(p, required=True)
     p = commands.add_parser("edge", help="查看或修改边文本")
     sub = p.add_subparsers(dest="edge_command", required=True)
     for name in ("show", "edit", "append"):
-        p = sub.add_parser(name)
-        p.add_argument("parent", type=int)
-        p.add_argument("child", type=int)
+        p = sub.add_parser(name, help=EDGE_COMMANDS[name][0])
+        p.add_argument("parent", type=int, help="边的来源节点 ID")
+        p.add_argument("child", type=int, help="边的目标节点 ID")
         if name != "show":
             edge_options(p)
     p = commands.add_parser("rm", help="删除没有连接的节点")
-    p.add_argument("id", type=int)
+    p.add_argument("id", type=int, help="已有节点的整数 ID")
     commands.add_parser("export", help="以 JSON 导出整个图")
+    for name, command_parser in commands.choices.items():
+        description, details = COMMANDS[name]
+        command_parser.description = description
+        command_parser.epilog = details + "\n\n" + GLOBAL_NOTE
+    for name, command_parser in sub.choices.items():
+        description, details = EDGE_COMMANDS[name]
+        command_parser.description = description
+        command_parser.epilog = details + "\n\n" + GLOBAL_NOTE
     return root
 
 
