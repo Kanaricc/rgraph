@@ -1,0 +1,14 @@
+[project]
+name = "rgraph"
+version = "0.1.0"
+description = "A text DAG for research, stored in SQLite"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+rgraph = "rgraph.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.9,<0.13"]
+build-backend = "uv_build"
