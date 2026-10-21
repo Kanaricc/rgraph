@@ -44,6 +44,15 @@ def text_options(parser):
     group.add_argument("--file", help="读取 UTF-8 文件；- 表示标准输入")
 
 
+def edge_options(parser, required=False):
+    parser.add_argument("--observation", required=required, help="导致改进的观测原因，不可为空")
+    parser.add_argument("--action", required=required, help="下一步要做什么，不可为空")
+
+
+def edge_text(edge):
+    return f"Observation: {edge['observation']}\nAction: {edge['action']}"
+
+
 def parser():
     root = Parser(description="SQLite 文本研究 DAG")
     root.add_argument("--db", default="research.db", help="数据库路径，默认 research.db")
@@ -54,7 +63,7 @@ def parser():
     add = commands.add_parser("add", help="创建节点及可选父边")
     text_options(add)
     add.add_argument("--parent", type=int)
-    add.add_argument("--edge-text")
+    edge_options(add)
     for name in ("edit", "append"):
         p = commands.add_parser(name, help="替换节点文本" if name == "edit" else "追加节点文本")
         p.add_argument("id", type=int)
@@ -84,7 +93,7 @@ def parser():
         p.add_argument("parent", type=int)
         p.add_argument("child", type=int)
         if name == "link":
-            text_options(p)
+            edge_options(p, required=True)
     p = commands.add_parser("edge", help="查看或修改边文本")
     sub = p.add_subparsers(dest="edge_command", required=True)
     for name in ("show", "edit", "append"):
@@ -92,7 +101,7 @@ def parser():
         p.add_argument("parent", type=int)
         p.add_argument("child", type=int)
         if name != "show":
-            text_options(p)
+            edge_options(p)
     p = commands.add_parser("rm", help="删除没有连接的节点")
     p.add_argument("id", type=int)
     commands.add_parser("export", help="以 JSON 导出整个图")
@@ -111,7 +120,7 @@ def read_text(args):
 async def execute(graph, args):
     command = args.command
     if command == "add":
-        return await graph.add(read_text(args), args.parent, args.edge_text)
+        return await graph.add(read_text(args), args.parent, args.observation, args.action)
     if command in ("edit", "append"):
         return await graph.update_text(read_text(args), node_id=args.id, append=command == "append")
     if command in ("set-value", "clear-value"):
@@ -125,13 +134,13 @@ async def execute(graph, args):
     if command == "tree":
         return await graph.tree(args.id, args.depth)
     if command == "link":
-        return await graph.link(args.parent, args.child, read_text(args))
+        return await graph.link(args.parent, args.child, args.observation, args.action)
     if command == "unlink":
         return await graph.unlink(args.parent, args.child)
     if command == "edge":
         if args.edge_command == "show":
             return await graph.edge(args.parent, args.child)
-        return await graph.update_text(read_text(args), parent=args.parent, child=args.child,
+        return await graph.update_edge(args.parent, args.child, args.observation, args.action,
                                  append=args.edge_command == "append")
     if command == "rm":
         return await graph.remove(args.id)
@@ -159,7 +168,7 @@ def render_tree(data, depth):
     while stack:
         node_id, prefix, connector, level, edge = stack.pop()
         if edge is not None:
-            lines = edge["text"].splitlines() or [""]
+            lines = edge_text(edge).splitlines()
             print(prefix + connector + lines[0])
             continuation = "    " if connector == "└── " else "│   "
             for line in lines[1:]:
@@ -205,7 +214,7 @@ def render(result, args):
         for label, key in (("Incoming", "incoming"), ("Outgoing", "outgoing")):
             print(f"\n{label}:")
             for edge in result[key]:
-                print(f"{edge['parent_id']} -> {edge['child_id']}\n{edge['text']}")
+                print(f"{edge['parent_id']} -> {edge['child_id']}\n{edge_text(edge)}")
     elif command == "list":
         print("ID\tVALUE\tSUBTREE\tSCORED/TOTAL\tTEXT")
         for node in result:
@@ -214,12 +223,13 @@ def render(result, args):
     elif command == "search":
         for match in result:
             label = str(match["id"]) if match["type"] == "node" else f"{match['parent_id']} -> {match['child_id']}"
-            print(f"{match['type']} {label}\n{match['text']}\n")
+            content = match["text"] if match["type"] == "node" else edge_text(match)
+            print(f"{match['type']} {label}\n{content}\n")
     elif command == "tree":
         render_tree(result, args.depth)
     elif command == "edge" and args.edge_command == "show":
         print(f"{result['parent_id']} -> {result['child_id']}")
-        print(f"Created: {result['created_at']}\nUpdated: {result['updated_at']}\n\n{result['text']}")
+        print(f"Created: {result['created_at']}\nUpdated: {result['updated_at']}\n\n{edge_text(result)}")
     elif "parent_id" in result:
         print(f"OK {result['parent_id']} -> {result['child_id']}")
     else:
@@ -230,7 +240,7 @@ def normalize_globals(argv):
     """Accept --db and --json before or after subcommands, preserving text arguments."""
     leading, trailing = [], []
     # Skip values belonging to text options even when they resemble global flags.
-    value_options = {"--text", "--file", "--edge-text", "--parent", "--sort", "--limit", "--depth", "--in"}
+    value_options = {"--text", "--file", "--observation", "--action", "--parent", "--sort", "--limit", "--depth", "--in"}
     i = 0
     while i < len(argv):
         token = argv[i]
@@ -275,8 +285,16 @@ def main(argv=None):
     try:
         args = parser().parse_args(normalized)
         json_mode = args.json
-        if args.command == "add" and ((args.parent is None) != (args.edge_text is None)):
-            raise GraphError("invalid_arguments", "--parent 和 --edge-text 必须一起使用。", 2)
+        if args.command in ("add", "link", "edge") and hasattr(args, "observation"):
+            Graph.validate_edge_fields(args.observation, args.action)
+            if args.command == "add":
+                has_parent = args.parent is not None
+                has_observation = args.observation is not None
+                has_action = args.action is not None
+                if not (has_parent == has_observation == has_action):
+                    raise GraphError("invalid_arguments", "--parent、--observation 和 --action 必须一起使用。", 2)
+            elif args.command == "edge" and args.observation is None and args.action is None:
+                raise GraphError("invalid_arguments", "至少指定 --observation 或 --action。", 2)
         if args.command == "show" and args.text_only and args.json:
             raise GraphError("invalid_arguments", "--text-only 不能与 --json 同时使用。", 2)
         result = asyncio.run(run_command(args))

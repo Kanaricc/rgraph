@@ -22,7 +22,8 @@ class Edge(models.Model):
     child = fields.ForeignKeyField(
         "models.Node", related_name="incoming", on_delete=fields.RESTRICT, db_index=True
     )
-    text = fields.TextField()
+    observation = fields.TextField()
+    action = fields.TextField()
     created_at = fields.TextField()
     updated_at = fields.TextField()
 

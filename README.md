@@ -1,6 +1,6 @@
 # rgraph
 
-用 SQLite 保存研究过程的文本 DAG，通过 CLI 操作。节点和边均保存任意文本，工具不解释文本结构，也不执行研究。需要 Python 3.11+，使用 Tortoise ORM 访问 SQLite。
+用 SQLite 保存研究过程的文本 DAG，通过 CLI 操作。节点保存任意文本；边保存两个必填文本字段：`observation`（导致改进的观测原因）和 `action`（下一步要做什么）。工具不解释节点文本结构，也不执行研究。需要 Python 3.11+，使用 Tortoise ORM 访问 SQLite。
 
 ## 安装
 
@@ -30,7 +30,7 @@ rgraph add --text "研究问题及初步计划"
 rgraph append 1 --file result.md
 rgraph set-value 1 0.4
 
-rgraph add --parent 1 --edge-text "扩大样本量" --file next-plan.md
+rgraph add --parent 1 --observation "当前样本量不足以支持结论" --action "扩大样本量" --file next-plan.md
 # 输出 2
 rgraph set-value 2 0.8
 
@@ -48,7 +48,7 @@ rgraph --db another.db init
 rgraph [--db PATH] [--json] COMMAND ...
 
 init
-add (--text TEXT | --file PATH) [--parent ID --edge-text TEXT]
+add (--text TEXT | --file PATH) [--parent ID --observation TEXT --action TEXT]
 edit ID (--text TEXT | --file PATH)
 append ID (--text TEXT | --file PATH)
 set-value ID VALUE
@@ -58,11 +58,11 @@ list [--roots] [--unscored]
      [--sort id|value|subtree-value|updated] [--desc] [--limit N]
 search QUERY [--in nodes|edges|all]
 tree [ID] [--depth N]
-link PARENT CHILD (--text TEXT | --file PATH)
+link PARENT CHILD --observation TEXT --action TEXT
 unlink PARENT CHILD
 edge show PARENT CHILD
-edge edit PARENT CHILD (--text TEXT | --file PATH)
-edge append PARENT CHILD (--text TEXT | --file PATH)
+edge edit PARENT CHILD [--observation TEXT] [--action TEXT]
+edge append PARENT CHILD [--observation TEXT] [--action TEXT]
 rm ID
 export
 ```
@@ -71,7 +71,7 @@ export
 
 ### 文本输入
 
-`--text` 和 `--file` 必须且只能选择一个；`--file -` 读取标准输入。文件按 UTF-8 读取，保留换行。空文本也可保存。
+节点的 `--text` 和 `--file` 必须且只能选择一个；`--file -` 读取标准输入。文件按 UTF-8 读取，保留换行。空文本也可保存。
 
 ```bash
 cat plan.md | rgraph add --file -
@@ -84,13 +84,15 @@ rgraph show 2 --text-only > node.md
 
 ### 边与汇合
 
-`add` 最多指定一个父节点，且 `--parent` 和 `--edge-text` 必须一起使用。更多入边使用 `link` 添加，各边分别保存文本：
+`add` 最多指定一个父节点，`--parent`、`--observation` 和 `--action` 必须一起使用。`link` 创建边时同样要求两个字段。字段不可为空或仅含空白，内容按原样保存。
+
+`edge edit` 替换指定字段，`edge append` 向指定字段追加一个换行及新内容；两者至少指定一个字段，未指定的字段保持原值。边不再接受 `--text`、`--file` 或 `--edge-text`。
 
 ```bash
-rgraph link 3 4 --text "结合节点 3 的发现"
+rgraph link 3 4 --observation "节点 3 显示参数影响结果" --action "固定样本集并调整参数"
 rgraph edge show 3 4
-rgraph edge edit 3 4 --file direction.md
-rgraph edge append 3 4 --text "补充：保持评估集不变"
+rgraph edge edit 3 4 --action "调整参数，并增加对照组"
+rgraph edge append 3 4 --observation "重复实验中也出现了相同现象"
 rgraph unlink 3 4
 ```
 
@@ -120,9 +122,9 @@ rgraph tree 1 --depth 3
 
 `list` 默认按 ID 升序，未指定数量则列出全部。价值为空时始终排最后。文本摘要取第一个非空行，最多 60 字符。
 
-搜索是区分大小写的字面子串匹配，不解释正则、`%` 或 `_`。默认搜索节点和边。
+搜索是区分大小写的字面子串匹配，不解释正则、`%` 或 `_`。默认搜索节点文本及边的 observation、action 字段。
 
-`tree` 默认从全部根展开，也可指定起点。起点深度为 0；未指定深度则完整展开。边文本完整显示；共享节点首次出现时展开，再次出现时显示 `↩`，不会重复展开。深度限制按首次出现路径应用。子树价值始终根据全部后代计算，不受显示深度限制。
+`tree` 默认从全部根展开，也可指定起点。起点深度为 0；未指定深度则完整展开。边的 observation、action 完整显示；共享节点首次出现时展开，再次出现时显示 `↩`，不会重复展开。深度限制按首次出现路径应用。子树价值始终根据全部后代计算，不受显示深度限制。
 
 ## JSON 与退出码
 
@@ -167,6 +169,6 @@ rgraph export > research.json
 
 使用 Tortoise ORM 和标准库 `argparse`。CLI 通过单个异步入口管理连接，写事务先取得 SQLite 写锁，再检查和修改图，避免并发连接破坏 DAG 约束。
 
-数据库版本为 2：边表增加内部自增 ID，并保留父子节点唯一约束。CLI 和导出仍用父子节点 ID 标识边，不暴露内部 ID。版本 1 数据库会返回 `invalid_database`，本版不提供旧库迁移。价值范围与禁止自连接由初始化时创建的触发器约束，普通数据操作通过 ORM 完成。
+数据库版本为 3：边使用 `observation` 和 `action` 替代 `text`。CLI、JSON 输出及导出均使用这两个字段，继续用父子节点 ID 标识边，不暴露内部 ID。旧版数据库会返回 `invalid_database`，本版不提供旧库迁移。价值范围与禁止自连接由初始化时创建的触发器约束，普通数据操作通过 ORM 完成。
 
 查询列表时逐节点计算后代均值，适合本地研究记录；目前没有对子树值做缓存。字面搜索在 ORM 读取文本后进行，保持大小写敏感及 `%`、`_` 的字面语义。

@@ -23,8 +23,8 @@ def timestamp():
 
 
 NODE_FIELDS = ("id", "text", "value", "created_at", "updated_at")
-EDGE_FIELDS = ("parent_id", "child_id", "text", "created_at", "updated_at")
-SCHEMA_VERSION = 2
+EDGE_FIELDS = ("parent_id", "child_id", "observation", "action", "created_at", "updated_at")
+SCHEMA_VERSION = 3
 
 
 class Graph:
@@ -49,7 +49,7 @@ class Graph:
             db = connections.get("default")
             rows = await db.execute_query_dict("PRAGMA user_version")
             if rows[0]["user_version"] != SCHEMA_VERSION:
-                raise GraphError("invalid_database", "不是版本 2 的 rgraph 数据库，请使用新数据库。", 1)
+                raise GraphError("invalid_database", "不是版本 3 的 rgraph 数据库，请使用新数据库。", 1)
             return cls()
         except BaseException:
             await Tortoise.close_connections()
@@ -77,7 +77,7 @@ class Graph:
                 CREATE TRIGGER edges_self_update BEFORE UPDATE OF parent_id, child_id ON edges
                 WHEN NEW.parent_id = NEW.child_id
                 BEGIN SELECT RAISE(ABORT, 'self link'); END;
-                PRAGMA user_version = 2;
+                PRAGMA user_version = 3;
             """)
         except BaseException:
             await Tortoise.close_connections()
@@ -132,16 +132,17 @@ class Graph:
         node["outgoing"] = await Edge.filter(parent_id=node_id).order_by("child_id").values(*EDGE_FIELDS)
         return node
 
-    async def add(self, text, parent=None, edge_text=None):
+    async def add(self, text, parent=None, observation=None, action=None):
         if parent is not None:
             await self.node(parent)
         now = timestamp()
         node = await Node.create(text=text, created_at=now, updated_at=now)
         if parent is not None:
-            await self.link(parent, node.id, edge_text)
+            await self.link(parent, node.id, observation, action)
         return await self.show(node.id)
 
-    async def link(self, parent, child, text):
+    async def link(self, parent, child, observation, action):
+        self.validate_edge_fields(observation, action)
         await self.node(parent)
         await self.node(child)
         if parent == child:
@@ -151,17 +152,32 @@ class Graph:
         if any(r["id"] == parent for r in await self.descendants(child)):
             raise GraphError("cycle_detected", f"连接 {parent} -> {child} 会形成环。")
         now = timestamp()
-        await Edge.create(parent_id=parent, child_id=child, text=text, created_at=now, updated_at=now)
+        await Edge.create(parent_id=parent, child_id=child, observation=observation, action=action, created_at=now, updated_at=now)
         return await self.edge(parent, child)
 
-    async def update_text(self, text, node_id=None, parent=None, child=None, append=False):
-        record = await self.node(node_id) if node_id is not None else await self.edge(parent, child)
+    @staticmethod
+    def validate_edge_fields(observation=None, action=None):
+        for name, value in (("observation", observation), ("action", action)):
+            if value is not None and not value.strip():
+                raise GraphError("invalid_arguments", f"{name} 不可为空或仅含空白。", 2)
+
+    async def update_text(self, text, node_id, append=False):
+        record = await self.node(node_id)
         if append and record["text"]:
             text = record["text"] + "\n" + text
-        if node_id is not None:
-            await Node.filter(id=node_id).update(text=text, updated_at=timestamp())
-            return await self.show(node_id)
-        await Edge.filter(parent_id=parent, child_id=child).update(text=text, updated_at=timestamp())
+        await Node.filter(id=node_id).update(text=text, updated_at=timestamp())
+        return await self.show(node_id)
+
+    async def update_edge(self, parent, child, observation=None, action=None, append=False):
+        self.validate_edge_fields(observation, action)
+        record = await self.edge(parent, child)
+        changes = {}
+        for name, value in (("observation", observation), ("action", action)):
+            if value is not None:
+                changes[name] = record[name] + "\n" + value if append else value
+        if not changes:
+            raise GraphError("invalid_arguments", "至少指定 --observation 或 --action。", 2)
+        await Edge.filter(parent_id=parent, child_id=child).update(**changes, updated_at=timestamp())
         return await self.edge(parent, child)
 
     async def set_value(self, node_id, value):
@@ -207,7 +223,7 @@ class Graph:
             matches.extend({"type": "node", **r} for r in rows if query in r["text"])
         if scope in ("edges", "all"):
             rows = await Edge.all().order_by("parent_id", "child_id").values(*EDGE_FIELDS)
-            matches.extend({"type": "edge", **r} for r in rows if query in r["text"])
+            matches.extend({"type": "edge", **r} for r in rows if query in r["observation"] or query in r["action"])
         return matches
 
     async def tree(self, node_id=None, depth=None):
