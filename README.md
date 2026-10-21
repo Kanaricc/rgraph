@@ -1,6 +1,6 @@
 # rgraph
 
-用 SQLite 保存研究过程的文本 DAG，通过 CLI 操作。节点和边均保存任意文本，工具不解释文本结构，也不执行研究。需要 Python 3.11+，无运行时第三方依赖。
+用 SQLite 保存研究过程的文本 DAG，通过 CLI 操作。节点和边均保存任意文本，工具不解释文本结构，也不执行研究。需要 Python 3.11+，使用 Tortoise ORM 访问 SQLite。
 
 ## 安装
 
@@ -160,8 +160,13 @@ rgraph export > research.json
 
 ## 项目结构
 
-- `src/rgraph/storage.py`：SQLite 表结构、事务内图操作、价值计算。
+- `src/rgraph/models.py`：节点、边的 Tortoise ORM 模型及关系约束。
+- `src/rgraph/storage.py`：ORM 生命周期、事务内图操作、价值计算。
 - `src/rgraph/cli.py`：参数解析、文本输入、终端和 JSON 输出、退出码。
 - `pyproject.toml`：Python 包和 `rgraph` 命令入口。
 
-使用标准库 `sqlite3` 和 `argparse`。查询列表时逐节点计算后代均值，适合本地研究记录；目前没有对子树值做缓存。
+使用 Tortoise ORM 和标准库 `argparse`。CLI 通过单个异步入口管理连接，写事务先取得 SQLite 写锁，再检查和修改图，避免并发连接破坏 DAG 约束。
+
+数据库版本为 2：边表增加内部自增 ID，并保留父子节点唯一约束。CLI 和导出仍用父子节点 ID 标识边，不暴露内部 ID。版本 1 数据库会返回 `invalid_database`，本版不提供旧库迁移。价值范围与禁止自连接由初始化时创建的触发器约束，普通数据操作通过 ORM 完成。
+
+查询列表时逐节点计算后代均值，适合本地研究记录；目前没有对子树值做缓存。字面搜索在 ORM 读取文本后进行，保持大小写敏感及 `%`、`_` 的字面语义。

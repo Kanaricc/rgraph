@@ -1,11 +1,13 @@
 """Command line interface for rgraph."""
 
 import argparse
+import asyncio
 import json
 import math
-import sqlite3
 import sys
 from pathlib import Path
+
+from tortoise.exceptions import BaseORMException
 
 from . import __version__
 from .storage import Graph, GraphError
@@ -106,35 +108,35 @@ def read_text(args):
         return stream.read()
 
 
-def execute(graph, args):
+async def execute(graph, args):
     command = args.command
     if command == "add":
-        return graph.add(read_text(args), args.parent, args.edge_text)
+        return await graph.add(read_text(args), args.parent, args.edge_text)
     if command in ("edit", "append"):
-        return graph.update_text(read_text(args), node_id=args.id, append=command == "append")
+        return await graph.update_text(read_text(args), node_id=args.id, append=command == "append")
     if command in ("set-value", "clear-value"):
-        return graph.set_value(args.id, args.value if command == "set-value" else None)
+        return await graph.set_value(args.id, args.value if command == "set-value" else None)
     if command == "show":
-        return graph.show(args.id)
+        return await graph.show(args.id)
     if command == "list":
-        return graph.list_nodes(args.roots, args.unscored, args.sort, args.desc, args.limit)
+        return await graph.list_nodes(args.roots, args.unscored, args.sort, args.desc, args.limit)
     if command == "search":
-        return graph.search(args.query, args.scope)
+        return await graph.search(args.query, args.scope)
     if command == "tree":
-        return graph.tree(args.id, args.depth)
+        return await graph.tree(args.id, args.depth)
     if command == "link":
-        return graph.link(args.parent, args.child, read_text(args))
+        return await graph.link(args.parent, args.child, read_text(args))
     if command == "unlink":
-        return graph.unlink(args.parent, args.child)
+        return await graph.unlink(args.parent, args.child)
     if command == "edge":
         if args.edge_command == "show":
-            return graph.edge(args.parent, args.child)
-        return graph.update_text(read_text(args), parent=args.parent, child=args.child,
+            return await graph.edge(args.parent, args.child)
+        return await graph.update_text(read_text(args), parent=args.parent, child=args.child,
                                  append=args.edge_command == "append")
     if command == "rm":
-        return graph.remove(args.id)
+        return await graph.remove(args.id)
     if command == "export":
-        return graph.export()
+        return await graph.export()
     raise AssertionError(command)
 
 
@@ -253,11 +255,23 @@ def normalize_globals(argv):
     return leading + trailing, "--json" in leading
 
 
+async def run_command(args):
+    if args.command == "init":
+        return await Graph.initialize(args.db)
+    graph = await Graph.open(args.db)
+    try:
+        write = args.command in {"add", "edit", "append", "set-value", "clear-value", "link", "unlink", "rm"} or (
+            args.command == "edge" and args.edge_command != "show")
+        async with graph.transaction(write):
+            return await execute(graph, args)
+    finally:
+        await graph.close()
+
+
 def main(argv=None):
     raw = list(sys.argv[1:] if argv is None else argv)
     normalized, json_mode = normalize_globals(raw)
     # Parsing failures also use JSON when a real global --json was supplied.
-    graph = None
     try:
         args = parser().parse_args(normalized)
         json_mode = args.json
@@ -265,22 +279,10 @@ def main(argv=None):
             raise GraphError("invalid_arguments", "--parent 和 --edge-text 必须一起使用。", 2)
         if args.command == "show" and args.text_only and args.json:
             raise GraphError("invalid_arguments", "--text-only 不能与 --json 同时使用。", 2)
-        if args.command == "init":
-            result = Graph.initialize(args.db)
-        else:
-            graph = Graph(args.db)
-            write = args.command in {"add", "edit", "append", "set-value", "clear-value", "link", "unlink", "rm"} or (
-                args.command == "edge" and args.edge_command != "show")
-            graph.begin(write)
-            try:
-                result = execute(graph, args)
-                graph.db.commit()
-            except BaseException:
-                graph.db.rollback()
-                raise
+        result = asyncio.run(run_command(args))
         render(result, args)
         return 0
-    except (GraphError, OSError, sqlite3.Error, UnicodeError) as exc:
+    except (GraphError, OSError, BaseORMException, UnicodeError) as exc:
         if isinstance(exc, GraphError):
             code, status = exc.code, exc.exit_code
         elif isinstance(exc, FileExistsError):
@@ -290,9 +292,6 @@ def main(argv=None):
         error = {"error": {"code": code, "message": str(exc)}}
         print(json.dumps(error, ensure_ascii=False) if json_mode else f"Error [{code}]: {exc}", file=sys.stderr)
         return status
-    finally:
-        if graph is not None:
-            graph.close()
 
 
 if __name__ == "__main__":
