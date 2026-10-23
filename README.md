@@ -62,7 +62,7 @@ show ID [--text-only]
 list [--roots] [--unscored]
      [--sort id|value|subtree-value|updated] [--desc] [--limit N]
 search QUERY [--in nodes|edges|all]
-tree [ID] [--depth N]
+tree [ID] [--depth N] [--full]
 link PARENT CHILD --observation TEXT --action TEXT
 unlink PARENT CHILD
 edge show PARENT CHILD
@@ -104,7 +104,7 @@ When setting or changing an experiment code directory, the directory must exist 
 
 A missing README produces `readme_required` (exit code 2), asking for a README describing how to reproduce the experiment. The operation makes no database changes. The README should explain the environment, execution steps, and how to reproduce the results. The tool checks only that the file exists, not whether its contents are complete.
 
-Relative directories are resolved against the command's working directory. `~` is supported, and the resolved absolute path is stored. Queries do not recheck directories or copy experiment code; update the stored path after moving a directory. `show` displays the conclusion and directory, and both fields are included in JSON queries and exports. Node searches also include conclusions. Terminal `tree` output displays the full conclusion below each node summary so that judgments at each stage can be followed along the research path. Unset conclusions are displayed as “尚未形成结论” (“No conclusion yet”).
+Relative directories are resolved against the command's working directory. `~` is supported, and the resolved absolute path is stored. Queries do not recheck directories or copy experiment code; update the stored path after moving a directory. `show` displays the conclusion and directory, and both fields are included in JSON queries and exports. Node searches also include conclusions. Terminal `tree` output displays a conclusion summary below each node; use `tree --full` to read complete conclusions and node text along the research path. Unset conclusions are displayed as “尚未形成结论” (“No conclusion yet”).
 
 ### Edges and merging
 
@@ -152,7 +152,9 @@ rgraph tree 1 --depth 3
 
 Search uses case-sensitive literal substring matching. Regular expressions, `%`, and `_` are not interpreted. By default, it searches node text, conclusions, and the `observation` and `action` fields of edges.
 
-`tree` starts from all roots by default, or from a specified node. The starting node is at depth 0. The entire graph is expanded unless a depth limit is specified. Edge observations and actions are shown in full. Shared nodes are expanded on their first appearance; subsequent appearances show `↩` without expanding again. Depth limits follow the first path on which a node is encountered. Subtree values always include all descendants, regardless of the display depth limit.
+`tree` starts from all roots by default, or from a specified node. The starting node is at depth 0. The entire graph is expanded unless a depth limit is specified. Branches connect nodes directly; each child's incoming observation and action appear below that child. By default, node text, conclusions, observations, and actions show the first nonempty line, truncated to at most 60 characters, with a remaining-line count for multiline content. Unset value fields are hidden. Use `rgraph tree 2 --full` to display complete node text, conclusions, observations, and actions with paragraph breaks preserved. Long lines wrap to the terminal width while retaining tree guides and indentation.
+
+Shared nodes are expanded on their first appearance; subsequent appearances show `↩` and their incoming edge information without repeating node details. Depth limits follow the first path on which a node is encountered. Subtree values always include all descendants, regardless of the display depth limit. JSON output always includes complete text regardless of `--full`.
 
 ## JSON and exit codes
 

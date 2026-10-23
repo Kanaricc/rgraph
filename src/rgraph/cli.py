@@ -4,7 +4,9 @@ import argparse
 import asyncio
 import json
 import math
+import shutil
 import sys
+import unicodedata
 from pathlib import Path
 
 from tortoise.exceptions import BaseORMException
@@ -101,6 +103,7 @@ def parser():
     p = commands.add_parser("tree", help="查看后续图结构")
     p.add_argument("id", type=int, nargs="?", help="展开起点 ID；省略则从所有根节点开始")
     p.add_argument("--depth", type=nonnegative, help="最大边数深度；0 仅起点，默认无限制")
+    p.add_argument("--full", action="store_true", help="展开节点文本、结论、观察和行动全文")
     for name in ("link", "unlink"):
         p = commands.add_parser(name, help="连接节点" if name == "link" else "移除边")
         p.add_argument("parent", type=int, help="边的来源节点 ID")
@@ -184,7 +187,44 @@ def preview(text):
     return line if len(line) <= 60 else line[:59] + "…"
 
 
-def render_tree(data, depth):
+def display_width(text):
+    return sum(0 if unicodedata.combining(char) else
+               2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
+               for char in text)
+
+
+def tree_summary(text):
+    lines = text.splitlines()
+    first = next((i for i, line in enumerate(lines) if line.strip()), None)
+    if first is None:
+        return "（空）"
+    summary = preview(lines[first])
+    remaining = len(lines) - first - 1
+    if remaining:
+        summary += f" …（另 {remaining} 行）"
+    return summary
+
+
+def render_tree(data, depth, full=False):
+    width = shutil.get_terminal_size(fallback=(100, 24)).columns
+
+    def emit(text, first_prefix, continuation=None):
+        continuation = first_prefix if continuation is None else continuation
+        for line in text.expandtabs(4).split("\n"):
+            prefix = first_prefix
+            chunk = ""
+            used = display_width(prefix)
+            for char in line:
+                size = display_width(char)
+                if chunk and used + size > width - 1:
+                    print(prefix + chunk)
+                    prefix, chunk = continuation, ""
+                    used = display_width(prefix)
+                chunk += char
+                used += size
+            print(prefix + chunk)
+            first_prefix = continuation
+
     nodes = {n["id"]: n for n in data["nodes"]}
     outgoing = {}
     for edge in data["edges"]:
@@ -193,33 +233,37 @@ def render_tree(data, depth):
     stack = [(root, "", "", 0, None) for root in reversed(data["roots"])]
     while stack:
         node_id, prefix, connector, level, edge = stack.pop()
+        repeated = node_id in seen
+        node = nodes[node_id]
+        child_prefix = prefix + ("    " if connector == "└── " else "│   " if connector else "")
+        children = outgoing.get(node_id, []) if not repeated and (depth is None or level < depth) else []
+        title = f"[{node_id}] " + ("↩ " if repeated else "") + tree_summary(node["text"])
+        emit(title, prefix + connector, child_prefix + "    ")
+        fields = []
         if edge is not None:
-            lines = edge_text(edge).splitlines()
-            print(prefix + connector + lines[0])
-            continuation = "    " if connector == "└── " else "│   "
-            for line in lines[1:]:
-                print(prefix + continuation + line)
-            prefix += continuation
-            connector = "└── "
-        if node_id in seen:
-            print(f"{prefix}{connector}[{node_id}] ↩")
+            fields.extend((("观察", edge["observation"]), ("行动", edge["action"])))
+        if not repeated:
+            if full:
+                fields.append(("文本", node["text"]))
+            fields.append(("结论", node["conclusion"] if node["conclusion"] is not None else "尚未形成结论"))
+        detail_prefix = child_prefix + ("│   " if children else "")
+        scores = [f"{label}={number(node[key])}" for label, key in
+                  (("value", "value"), ("subtree", "subtree_value")) if node[key] is not None]
+        if scores and not repeated:
+            emit("  ".join(scores), detail_prefix)
+        for index, (label, text) in enumerate(fields):
+            if full:
+                last = index == len(fields) - 1
+                emit(label, detail_prefix + ("└─ " if last else "├─ "))
+                emit(text, detail_prefix + ("   " if last else "│  "))
+            else:
+                emit(tree_summary(text), detail_prefix + label + "：",
+                     detail_prefix + "      ")
+        if stack or children:
+            print(child_prefix.rstrip())
+        if repeated:
             continue
         seen.add(node_id)
-        node = nodes[node_id]
-        print(f"{prefix}{connector}[{node_id}] {preview(node['text'])}  "
-              f"value={number(node['value'])}  subtree={number(node['subtree_value'])}")
-        child_prefix = prefix + ("    " if connector == "└── " else "│   " if connector else "")
-        conclusion = node["conclusion"]
-        if conclusion is None:
-            print(child_prefix + "Conclusion: 尚未形成结论")
-        else:
-            lines = conclusion.splitlines()
-            print(child_prefix + "Conclusion: " + lines[0])
-            for line in lines[1:]:
-                print(child_prefix + "            " + line)
-        if depth is not None and level >= depth:
-            continue
-        children = outgoing.get(node_id, [])
         for index in range(len(children) - 1, -1, -1):
             edge = children[index]
             stack.append((edge["child_id"], child_prefix,
@@ -263,7 +307,7 @@ def render(result, args):
             content = match["text"] if match["type"] == "node" else edge_text(match)
             print(f"{match['type']} {label}\n{content}\n")
     elif command == "tree":
-        render_tree(result, args.depth)
+        render_tree(result, args.depth, args.full)
     elif command == "edge" and args.edge_command == "show":
         print(f"{result['parent_id']} -> {result['child_id']}")
         print(f"Created: {result['created_at']}\nUpdated: {result['updated_at']}\n\n{edge_text(result)}")
