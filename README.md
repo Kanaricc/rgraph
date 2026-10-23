@@ -1,6 +1,6 @@
 # rgraph
 
-A CLI for storing research progress as a text DAG in SQLite. Nodes hold arbitrary text, a separate conclusion, and an experiment code directory. Edges have two required text fields: `observation` (the observation motivating a change) and `action` (what to do next). The tool does not interpret the structure of node text or conduct research. Requires Python 3.11+ and uses Tortoise ORM to access SQLite.
+A CLI for storing research progress as a text DAG in SQLite. Nodes hold a strictly structured YAML experiment plan, a separate conclusion, and an experiment code directory. Edges have two required text fields: `observation` (the observation motivating a change) and `action` (what to do next). The tool validates the plan structure but does not evaluate its scientific content or conduct research. Requires Python 3.11+ and uses Tortoise ORM to access SQLite.
 
 ## Installation
 
@@ -24,15 +24,15 @@ Each database file holds one graph. By default, commands use `research.db` in th
 
 ```bash
 rgraph init
-rgraph add --text "Research question and initial plan"
+rgraph add --file plan.example.yaml
 # Prints 1; the new node has no value score yet.
 
-rgraph append 1 --file result.md
+# Save detailed results in the experiment directory.
 rgraph set-conclusion 1 --file conclusion.md
 rgraph set-code-dir 1 ./experiments/baseline
 rgraph set-value 1 0.4  # Human evaluation only; agents must not assign scores.
 
-rgraph add --parent 1 --observation "The current sample is too small to support the conclusion" --action "Increase the sample size" --file next-plan.md
+rgraph add --parent 1 --observation "The current sample is too small to support the conclusion" --action "Increase the sample size" --file next-plan.yaml
 # Prints 2.
 rgraph set-value 2 0.8  # Human evaluation only.
 
@@ -53,7 +53,6 @@ init
 add (--text TEXT | --file PATH) [--conclusion TEXT] [--code-dir PATH]
     [--parent ID --observation TEXT --action TEXT]
 edit ID (--text TEXT | --file PATH)
-append ID (--text TEXT | --file PATH)
 set-conclusion ID (--text TEXT | --file PATH)
 set-code-dir ID PATH
 set-value ID VALUE
@@ -76,16 +75,57 @@ Global options can also appear after a subcommand. `rgraph --help` includes a co
 
 ### Text input
 
-Specify exactly one of `--text` and `--file` for node text. `--file -` reads standard input. Files are read as UTF-8 with line breaks preserved. Empty text is allowed.
+Specify exactly one of `--text` and `--file` for node text. `--file -` reads standard input. Files are read as UTF-8 with line breaks preserved. Node text must be a complete experiment plan matching the structure below.
 
 ```bash
-cat plan.md | rgraph add --file -
-rgraph edit 2 --file revised.md
-rgraph append 2 --text "Additional experiment results"
-rgraph show 2 --text-only > node.md
+cat plan.yaml | rgraph add --file -
+rgraph edit 2 --file revised-plan.yaml
+rgraph show 2 --text-only > node.yaml
 ```
 
-`edit` replaces the entire text. `append` inserts one newline between nonempty existing text and the new text. The tool stores only the current text and timestamps, without revision history. `show --text-only` outputs the node text exactly as stored, without adding a trailing newline, and cannot be combined with `--json`.
+`add` and `edit` validate the complete plan before writing. `edit` replaces the entire plan; keep detailed results in the experiment directory. Invalid plans return `invalid_plan` (exit code 2) without changing the database. Original YAML formatting is preserved. The tool stores only the current text and timestamps, without revision history. `show --text-only` outputs the node text exactly as stored, without adding a trailing newline, and cannot be combined with `--json`.
+
+### Experiment plan structure
+
+Use [plan.example.yaml](plan.example.yaml) as a starting point. Each node text must contain one YAML document with exactly these fields:
+
+```yaml
+plan_version: 1
+title: Experiment title
+question: |
+  The specific question this experiment will answer.
+hypothesis: |
+  The testable hypothesis and its basis.
+design: |
+  Experimental conditions, baseline, variables, and controls.
+evaluation: |
+  Data selection, metric definitions, repetitions, and aggregation.
+decision:
+  supported: |
+    Conditions under which the hypothesis is supported.
+  not_supported: |
+    Conditions under which a valid experiment does not support the hypothesis.
+  inconclusive: |
+    Conditions under which the evidence is insufficient to decide.
+execution:
+  environment: |
+    - Identify each machine and the CPU, GPU, memory, or other resources to use.
+    - List read-only files and directories with their machine and absolute path.
+    - List read-write files and directories, including environments, caches, and temporary files.
+    - Describe the software environment.
+  steps: |
+    Describe the execution steps in order.
+  prohibited_actions: |
+    Describe prohibited actions, or explicitly state that there are no additional prohibitions.
+  artifacts: |
+    Describe final deliverables, which can be files or network links, and their locations.
+  stop_condition: |
+    Describe completion criteria, resource limits, and conditions requiring an early stop.
+```
+
+All fields are required, and unknown or duplicate fields are rejected at every object level. `plan_version` must be the integer `1`; all other leaf values must be nonempty strings after whitespace is stripped. In particular, `hypothesis`, `design`, `evaluation`, and every field under `execution` are plain text, not nested objects or YAML lists. Use `|` to preserve intentional line breaks without wrapping sentences to a fixed width.
+
+Validation checks structure and types, not whether the prose describes a sound experiment or whether declared permissions are obeyed. The plan does not replace the separate `conclusion` and `code_dir` fields. Existing stored text remains readable; any subsequent text write must pass validation. Database schema version remains 4.
 
 ### Conclusions and experiment code directories
 
@@ -174,11 +214,11 @@ Successful output goes to stdout; errors go to stderr. JSON errors have this str
 | --- | --- |
 | 0 | Success |
 | 1 | Execution errors, such as file, database, or encoding errors |
-| 2 | Argument errors, including an out-of-range value, an empty conclusion, an invalid experiment directory, or a missing README |
+| 2 | Argument errors, including an invalid experiment plan, an out-of-range value, an empty conclusion, an invalid experiment directory, or a missing README |
 | 3 | Node or edge not found |
 | 4 | Conflicts, including duplicate edges, cycles, deletion of a connected node, a missing parent, an incomplete parent, or an existing initialization target |
 
-Application error codes include `invalid_arguments`, `parent_required`, `node_incomplete`, `invalid_code_dir`, `readme_required`, `node_not_found`, `edge_not_found`, `self_link`, `edge_exists`, `cycle_detected`, `node_connected`, `database_exists`, and `invalid_database`. Other execution errors use `execution_error`.
+Application error codes include `invalid_plan`, `invalid_arguments`, `parent_required`, `node_incomplete`, `invalid_code_dir`, `readme_required`, `node_not_found`, `edge_not_found`, `self_link`, `edge_exists`, `cycle_detected`, `node_connected`, `database_exists`, and `invalid_database`. Other execution errors use `execution_error`.
 
 Only `init` creates a database. All mutations run in a single transaction, and queries use a consistent database snapshot. The program does not prompt for confirmation or launch an editor.
 
@@ -192,12 +232,13 @@ rgraph export > research.json
 
 ## Project structure
 
+- `src/rgraph/plans.py`: Strict YAML experiment-plan validation.
 - `src/rgraph/models.py`: Tortoise ORM models and relationship constraints for nodes and edges.
 - `src/rgraph/storage.py`: ORM lifecycle, transactional graph operations, and value calculation.
 - `src/rgraph/cli.py`: Argument parsing, text input, terminal and JSON output, and exit codes.
 - `pyproject.toml`: Python package metadata and the `rgraph` command entry point.
 
-The project uses Tortoise ORM and the standard-library `argparse` module. The CLI manages connections through a single asynchronous entry point. Write transactions acquire a SQLite write lock before checking and modifying the graph, preventing concurrent connections from violating DAG constraints.
+The project uses Tortoise ORM, PyYAML for plan parsing, and the standard-library `argparse` module. The CLI manages connections through a single asynchronous entry point. Write transactions acquire a SQLite write lock before checking and modifying the graph, preventing concurrent connections from violating DAG constraints.
 
 Database schema version 4 adds nullable `conclusion` and `code_dir` node fields and uses `observation` and `action` on edges. These fields are used throughout the CLI, JSON output, and exports. Edges are still identified by parent and child node IDs; internal edge IDs are not exposed. Older databases return `invalid_database`; this version does not provide migration from older schemas. Value bounds and the prohibition on self-links are enforced by triggers created during initialization. Regular data operations use the ORM.
 

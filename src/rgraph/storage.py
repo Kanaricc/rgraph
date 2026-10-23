@@ -7,6 +7,7 @@ from tortoise.expressions import F, Q
 from tortoise.transactions import in_transaction
 
 from .models import Edge, Node
+from .plans import validate_plan
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -133,6 +134,7 @@ class Graph:
         return node
 
     async def add(self, text, parent=None, observation=None, action=None, conclusion=None, code_dir=None):
+        self.validate_plan(text)
         if conclusion is not None:
             self.validate_conclusion(conclusion)
         if code_dir is not None:
@@ -179,10 +181,16 @@ class Graph:
             if value is not None and not value.strip():
                 raise GraphError("invalid_arguments", f"{name} 不可为空或仅含空白。", 2)
 
-    async def update_text(self, text, node_id, append=False):
-        record = await self.node(node_id)
-        if append and record["text"]:
-            text = record["text"] + "\n" + text
+    @staticmethod
+    def validate_plan(text):
+        try:
+            validate_plan(text)
+        except ValueError as exc:
+            raise GraphError("invalid_plan", str(exc), 2) from exc
+
+    async def update_text(self, text, node_id):
+        await self.node(node_id)
+        self.validate_plan(text)
         await Node.filter(id=node_id).update(text=text, updated_at=timestamp())
         return await self.show(node_id)
 

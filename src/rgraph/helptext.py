@@ -5,17 +5,24 @@ OVERVIEW = """用 SQLite 保存研究 DAG，通过文本节点和带 observation
 
 开始使用（示例 ID 假定从空库开始；实际使用 add 返回的 ID）：
   rgraph init
-  rgraph add --text "基线研究计划"
+  rgraph add --file plan.yaml
   # 在 ./experiments/baseline 完成实验，并编写根部 README.md 说明复现方式。
-  rgraph append 1 --text "实验结果：样本量不足"
+  # 将详细实验结果保存在实验目录中。
   rgraph set-conclusion 1 --text "当前结果需要更多样本验证"
   rgraph set-code-dir 1 ./experiments/baseline
   # 价值由用户人工评估；Agent 禁止自行调用 set-value / clear-value。
-  rgraph add --parent 1 --observation "样本量不足" --action "扩大样本量" --text "下一轮计划"
+  rgraph add --parent 1 --observation "样本量不足" --action "扩大样本量" --file next-plan.yaml
   rgraph tree
   rgraph --json show 1
 
 必须遵守：
+  * text 必须是单个 YAML 实验计划；完整示例见项目 plan.example.yaml。
+  * 必填字段：plan_version=整数 1，title、question、hypothesis、design、evaluation；
+    decision 包含 supported、not_supported、inconclusive；
+    execution 包含 environment、steps、prohibited_actions、artifacts、stop_condition。
+  * 除版本外所有叶子字段必须是非空白字符串；禁止未知字段和重复字段。
+    environment 用文本逐条声明机器资源及文件（夹）的只读、读写权限。
+    add/edit 校验完整计划，失败为 invalid_plan（退出码 2）；计划修订使用 edit 整体替换。
   * conclusion 只能在实验结束后设置为基于实际结果的具体结论，禁止填写占位信息
     （如“待实验”“待补充”“TODO”）；实验未结束时保持未设置。
   * 已有子节点的父节点禁止清空 conclusion；可替换为新的具体结论。
@@ -37,7 +44,7 @@ OVERVIEW = """用 SQLite 保存研究 DAG，通过文本节点和带 observation
   --db 和 --json 可放在子命令前后。add 默认仅输出新 ID；--json 返回对象。
   成功结果写 stdout，错误写 stderr；修改原子提交，失败整体回滚。
   --json 错误：{"error":{"code":"node_incomplete","message":"..."}}
-  退出码：0 成功；1 文件/数据库错误；2 参数或目录/README 错误；
+  退出码：0 成功；1 文件/数据库错误；2 参数、实验计划或目录/README 错误；
           3 节点/边不存在；4 操作冲突（父节点不完整、缺少父节点、环等）。
   每个命令提供 --help；边操作详见 rgraph edge --help。
 """
@@ -63,30 +70,21 @@ COMMANDS = {
   --conclusion 只能在实验结束后填写基于实际结果的具体结论，禁止“待实验”、
   “待补充”、“TODO”等占位信息；实验未结束时省略此参数。
   提供结论时不可为空白；提供目录时立即校验。节点及父边在同一事务创建。
+  text 必须符合实验计划 YAML 结构；无效计划返回 invalid_plan（2）。
   失败：parent_required / node_incomplete（4），readme_required（2），
   node_not_found（3）。多父节点先 add，再使用 link 补充其余入边。
 
 示例：
-  rgraph add --file initial-plan.md
-  rgraph add --parent 1 --observation "样本不足" --action "扩大样本" --file next.md
-  rgraph add --parent 1 --observation "效果稳定" --action "复现结果" --text "复现计划" --code-dir ./experiment
+  rgraph add --file initial-plan.yaml
+  rgraph add --parent 1 --observation "样本不足" --action "扩大样本" --file next.yaml
+  rgraph add --parent 1 --observation "效果稳定" --action "复现结果" --file replication-plan.yaml --code-dir ./experiment
 """),
-    "edit": ("替换节点的完整 text 字段。", """--text 与 --file 必选其一，--file - 读取标准输入；允许空文本。
+    "edit": ("替换节点的完整 text 字段。", """--text 与 --file 必选其一，--file - 读取标准输入；必须提供完整、有效的 YAML 实验计划。
 仅替换 text，不修改结论、实验目录、价值或连接；不保存旧版本。
 默认输出 OK ID；--json 返回更新后的节点及相邻边和价值统计。
 
 示例：
-  rgraph edit 2 --file revised-plan.md
-  rgraph edit 2 --text "新的完整研究记录"
-"""),
-    "append": ("向节点 text 追加实验记录。", """--text 与 --file 必选其一，--file - 读取标准输入。
-原文非空时在原文和新增文本之间插入一个换行；原文为空则直接写入。
-不更新独立结论字段；结论请用 set-conclusion。默认输出 OK ID，
---json 返回更新后的节点及相邻边和价值统计。
-
-示例：
-  rgraph append 2 --file result.md
-  rgraph append 2 --text "观察：新增样本表现相同"
+  rgraph edit 2 --file revised-plan.yaml
 """),
     "set-conclusion": ("设置或替换节点的独立研究结论。", """--text 与 --file 必选其一，--file - 读取标准输入；拒绝空白结论。
 只能在实验结束后设置基于实际结果的具体结论，禁止“待实验”、“待补充”、

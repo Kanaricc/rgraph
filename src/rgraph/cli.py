@@ -61,7 +61,7 @@ def edge_text(edge):
 
 
 def parser():
-    root = Parser(prog="rgraph", description="管理研究 DAG：文本节点、实验结论与代码目录，以及观测/动作边。", epilog=OVERVIEW)
+    root = Parser(prog="rgraph", description="管理研究 DAG：YAML 实验计划节点、实验结论与代码目录，以及观测/动作边。", epilog=OVERVIEW)
     root.add_argument("--db", default="research.db", help="数据库路径，默认 research.db")
     root.add_argument("--json", action="store_true", help="输出 JSON")
     root.add_argument("--version", action="version", version=f"rgraph {__version__}")
@@ -73,10 +73,9 @@ def parser():
     edge_options(add)
     add.add_argument("--conclusion", help="仅在实验结束后填写具体结论，禁止占位信息；可后续设置")
     add.add_argument("--code-dir", help="实验代码目录，根部必须有 README")
-    for name in ("edit", "append"):
-        p = commands.add_parser(name, help="替换节点文本" if name == "edit" else "追加节点文本")
-        p.add_argument("id", type=int, help="已有节点的整数 ID")
-        text_options(p)
+    p = commands.add_parser("edit", help="替换节点的完整实验计划")
+    p.add_argument("id", type=int, help="已有节点的整数 ID")
+    text_options(p)
     p = commands.add_parser("set-conclusion", help="设置节点结论")
     p.add_argument("id", type=int, help="已有节点的整数 ID")
     text_options(p)
@@ -146,8 +145,8 @@ async def execute(graph, args):
     if command == "add":
         return await graph.add(read_text(args), args.parent, args.observation, args.action,
                                conclusion=args.conclusion, code_dir=args.code_dir)
-    if command in ("edit", "append"):
-        return await graph.update_text(read_text(args), node_id=args.id, append=command == "append")
+    if command == "edit":
+        return await graph.update_text(read_text(args), node_id=args.id)
     if command == "set-conclusion":
         return await graph.set_conclusion(args.id, read_text(args))
     if command == "set-code-dir":
@@ -351,7 +350,7 @@ async def run_command(args):
         return await Graph.initialize(args.db)
     graph = await Graph.open(args.db)
     try:
-        write = args.command in {"add", "edit", "append", "set-value", "clear-value", "set-conclusion", "set-code-dir", "link", "unlink", "rm"} or (
+        write = args.command in {"add", "edit", "set-value", "clear-value", "set-conclusion", "set-code-dir", "link", "unlink", "rm"} or (
             args.command == "edge" and args.edge_command != "show")
         async with graph.transaction(write):
             return await execute(graph, args)

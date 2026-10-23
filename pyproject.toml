@@ -5,6 +5,7 @@ description = "A text DAG for research, stored in SQLite"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "pyyaml>=6.0.3",
     "tortoise-orm>=1.1.9",
 ]
 

@@ -1,0 +1,60 @@
+plan_version: 1
+title: 扩大候选集能否改善检索召回率
+
+question: |
+  在固定检索模型和评测集的条件下，将候选数从 20 增加至 50，是否能使 Recall@10 至少提高 2 个百分点？
+
+hypothesis: |
+  当前召回受候选集规模限制，增加候选数可以改善 Recall@10。依据是父节点的错误分析：部分相关文档未进入候选集。
+
+design: |
+  比较 candidate_count=20 和 candidate_count=50 两组条件，前者作为基线。
+  两组使用相同的 retrieval-model-v3、corpus-v2、cosine 排序、top_k=10 和 fp32 精度。除候选数外，其余配置保持一致。
+  使用 seed 17、42、83 分别进行配对运行，共 6 次运行。
+
+evaluation: |
+  使用 retrieval-eval v2 的完整 test split，共 1000 条查询，不排除任何查询。两组使用相同的查询与相关性标注。
+  主要指标为 Recall@10：每条查询前 10 个结果中的相关文档数，除以该查询的相关文档总数。每轮对查询取均值，再对三轮取均值。同时报告每轮两组的指标差值。
+  约束指标为单查询延迟的第 95 百分位。在相同硬件、并发数 1、完成预热的条件下测量；候选数增加后的延迟增幅不得超过 20%。
+
+decision:
+  supported: |
+    candidate_count=50 的平均 Recall@10 至少提高 0.02，每轮差值均大于 0，且满足延迟约束。
+  not_supported: |
+    完成全部有效运行，但未满足上述支持条件。
+  inconclusive: |
+    缺少有效运行，或两组数据、环境、评测口径不一致，导致结果无法用于判断假设。
+
+execution:
+  environment: |
+    - 机器：gpu-worker-01；使用 GPU 0，最多占用 24 GiB 显存、8 个 CPU 核和 32 GiB 内存。
+    - 只读目录：gpu-worker-01:/data/retrieval-eval/v2，用于读取评测查询和相关性标注。
+    - 只读目录：gpu-worker-01:/data/models/retrieval-model-v3，用于读取模型权重与配置。
+    - 读写目录：gpu-worker-01:/workspace/experiments/candidate-count，用于保存实验代码、依赖环境、缓存、临时文件、日志和结果。
+    - 软件环境：在上述读写目录内使用依赖锁文件创建 Python 环境；两组使用相同的软件版本、模型权重和驱动环境。
+
+  steps: |
+    1. 检查机器资源和目录权限，确认数据及模型版本。
+    2. 准备依赖环境，校验查询 ID 和相关性标注。
+    3. 按 seed 配对运行两组实验，记录配置、逐查询指标及延迟。
+    4. 检查运行是否完整，汇总各轮指标、平均差值和延迟增幅。
+    5. 按 decision 判断结果，整理复现说明和最终产物。
+
+  prohibited_actions: |
+    - 不得修改或删除评测数据、相关性标注和模型权重。
+    - 不得在声明的读写范围之外写入文件。
+    - 不得修改系统环境、安装系统级软件或重启机器。
+    - 不得停止其他任务或使用未声明的 GPU。
+    - 不得根据已观察到的结果修改评测样本、指标或判断阈值。
+
+  artifacts: |
+    在 gpu-worker-01:/workspace/experiments/candidate-count 中生成：
+    - results/per_query.jsonl：各条件、各轮、各查询的原始评测结果。
+    - results/summary.json：汇总指标、差值及延迟约束检查。
+    - README.md：环境、执行命令、结果说明和复现步骤。
+    最终交付说明列出所有产物的机器标识及绝对路径。产物也可以是网络链接；若有，应提供完整 URL 并说明对应内容。
+
+  stop_condition: |
+    - 完成 6 次有效运行并生成全部产物后结束。
+    - 总 GPU 使用时间达到 2 小时仍未完成时停止，保留已有记录，并按 decision 判断结果。
+    - 数据校验失败、资源不可用，或后续步骤需要执行禁止动作时停止，记录原因，并按 decision 判断结果。
