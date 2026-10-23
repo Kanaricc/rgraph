@@ -200,8 +200,8 @@ class Graph:
 
     @staticmethod
     def validate_conclusion(conclusion):
-        if not conclusion.strip():
-            raise GraphError("invalid_arguments", "结论不可为空或仅含空白。", 2)
+        if conclusion is None or not conclusion.strip():
+            raise GraphError("invalid_arguments", "结论不可为空或仅含空白；已有子节点的父节点禁止清空结论。", 2)
 
     @staticmethod
     def validate_code_dir(code_dir):

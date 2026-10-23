@@ -71,7 +71,7 @@ def parser():
     text_options(add)
     add.add_argument("--parent", type=int, help="已有父节点 ID；非空图必填，父节点须补齐结论和实验目录")
     edge_options(add)
-    add.add_argument("--conclusion", help="研究结论，可后续设置")
+    add.add_argument("--conclusion", help="仅在实验结束后填写具体结论，禁止占位信息；可后续设置")
     add.add_argument("--code-dir", help="实验代码目录，根部必须有 README")
     for name in ("edit", "append"):
         p = commands.add_parser(name, help="替换节点文本" if name == "edit" else "追加节点文本")

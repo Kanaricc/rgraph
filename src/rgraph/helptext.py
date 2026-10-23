@@ -16,6 +16,9 @@ OVERVIEW = """用 SQLite 保存研究 DAG，通过文本节点和带 observation
   rgraph --json show 1
 
 必须遵守：
+  * conclusion 只能在实验结束后设置为基于实际结果的具体结论，禁止填写占位信息
+    （如“待实验”“待补充”“TODO”）；实验未结束时保持未设置。
+  * 已有子节点的父节点禁止清空 conclusion；可替换为新的具体结论。
   * 仅空图允许 add 不带父节点；之后必须指定已存在的 --parent。
   * 父节点有非空结论、实验目录及根部 README 后，才可 add 子节点或 link。
     写入目录和展开父节点时均检查目录及 README，缺失则报错。
@@ -57,6 +60,8 @@ COMMANDS = {
   空图可省略父节点；非空图必须提供 --parent、--observation、--action 三项。
   父节点必须有非空结论、有效实验目录和根部 README，否则拒绝创建。
   --conclusion、--code-dir 是新节点自己的字段，允许先留空再补充。
+  --conclusion 只能在实验结束后填写基于实际结果的具体结论，禁止“待实验”、
+  “待补充”、“TODO”等占位信息；实验未结束时省略此参数。
   提供结论时不可为空白；提供目录时立即校验。节点及父边在同一事务创建。
   失败：parent_required / node_incomplete（4），readme_required（2），
   node_not_found（3）。多父节点先 add，再使用 link 补充其余入边。
@@ -84,6 +89,9 @@ COMMANDS = {
   rgraph append 2 --text "观察：新增样本表现相同"
 """),
     "set-conclusion": ("设置或替换节点的独立研究结论。", """--text 与 --file 必选其一，--file - 读取标准输入；拒绝空白结论。
+只能在实验结束后设置基于实际结果的具体结论，禁止“待实验”、“待补充”、
+“TODO”等占位信息；实验未结束时保持未设置。
+已有子节点的父节点禁止清空 conclusion；可替换为新的具体结论。
 结论不从 text 提取，也不自动同步到 text。父节点必须有结论和带 README
 的实验目录才能产生子节点或 link。默认输出 OK ID；--json 返回节点详情。
 

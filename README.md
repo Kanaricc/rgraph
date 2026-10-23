@@ -89,7 +89,7 @@ rgraph show 2 --text-only > node.md
 
 ### Conclusions and experiment code directories
 
-A node's `conclusion` and `code_dir` are separate fields. Both may be left unset when creating a node (`null` in JSON) and set later. A node cannot have children added or be used as the parent of a `link` until both fields are populated. The experiment directory and README are checked again when extending a node; an invalid directory or a deleted README also blocks the operation. Conclusions are not extracted from node text. Setting a conclusion replaces the previous one; empty or whitespace-only conclusions are rejected.
+A node's `conclusion` and `code_dir` are separate fields. Both may be left unset when creating a node (`null` in JSON) and set later. A node cannot have children added or be used as the parent of a `link` until both fields are populated. The experiment directory and README are checked again when extending a node; an invalid directory or a deleted README also blocks the operation. Conclusions are not extracted from node text. Set `conclusion` only after the experiment has finished, using a concrete conclusion based on actual results. Placeholder content such as “pending experiment”, “TODO”, or “to be filled in” is prohibited; leave the field unset until the experiment is finished. Setting a conclusion replaces the previous one; null, empty, or whitespace-only conclusions are rejected. A parent that already has children must not have its conclusion cleared, but it may be replaced with a new concrete conclusion.
 
 ```bash
 rgraph set-conclusion 2 --text "The improvement remains stable with a larger sample"
