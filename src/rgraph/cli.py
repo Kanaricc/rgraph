@@ -9,7 +9,10 @@ import sys
 import unicodedata
 from pathlib import Path
 
+import yaml
 from tortoise.exceptions import BaseORMException
+
+from .plans import PlanLoader
 
 from . import __version__
 from .helptext import COMMANDS, EDGE_COMMANDS, GLOBAL_NOTE, OVERVIEW
@@ -186,6 +189,16 @@ def preview(text):
     return line if len(line) <= 60 else line[:59] + "…"
 
 
+def plan_title(text):
+    try:
+        plan = yaml.load(text, Loader=PlanLoader)
+    except yaml.YAMLError:
+        return preview(text)
+    if isinstance(plan, dict) and isinstance(plan.get("title"), str) and plan["title"].strip():
+        return preview(plan["title"])
+    return preview(text)
+
+
 def display_width(text):
     return sum(0 if unicodedata.combining(char) else
                2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
@@ -236,7 +249,7 @@ def render_tree(data, depth, full=False):
         node = nodes[node_id]
         child_prefix = prefix + ("    " if connector == "└── " else "│   " if connector else "")
         children = outgoing.get(node_id, []) if not repeated and (depth is None or level < depth) else []
-        title = f"[{node_id}] " + ("↩ " if repeated else "") + tree_summary(node["text"])
+        title = f"[{node_id}] " + ("↩ " if repeated else "") + plan_title(node["text"])
         emit(title, prefix + connector, child_prefix + "    ")
         fields = []
         if edge is not None:
@@ -299,12 +312,20 @@ def render(result, args):
         for node in result:
             conclusion = preview(node["conclusion"]) if node["conclusion"] is not None else "尚未形成结论"
             print(f"{node['id']}\t{number(node['value'])}\t{number(node['subtree_value'])}\t"
-                  f"{node['scored_descendant_count']}/{node['descendant_count']}\t{preview(node['text'])}\t{conclusion}")
+                  f"{node['scored_descendant_count']}/{node['descendant_count']}\t{plan_title(node['text'])}\t{conclusion}")
     elif command == "search":
         for match in result:
             label = str(match["id"]) if match["type"] == "node" else f"{match['parent_id']} -> {match['child_id']}"
-            content = match["text"] if match["type"] == "node" else edge_text(match)
-            print(f"{match['type']} {label}\n{content}\n")
+            if match["type"] == "node":
+                print(f"node {label}: {plan_title(match['text'])}")
+                for field, name in (("text", "计划"), ("conclusion", "结论")):
+                    content = match[field]
+                    if content is not None:
+                        marker = "（匹配）" if args.query in content else ""
+                        print(f"\n{name}{marker}：\n{content}")
+                print()
+            else:
+                print(f"edge {label}\n{edge_text(match)}\n")
     elif command == "tree":
         render_tree(result, args.depth, args.full)
     elif command == "edge" and args.edge_command == "show":
