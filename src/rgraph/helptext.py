@@ -54,6 +54,8 @@ GLOBAL_NOTE = "全局参数：--db PATH（默认 research.db）、--json；可�
 COMMANDS = {
     "init": ("初始化一份独立研究数据库。", """目标文件必须不存在；已有文件返回 database_exists（退出码 4），不覆盖。
 创建结构版本 4。父目录必须存在；其他命令要求先初始化。
+同时在数据库同目录写入 AGENT.md，要求使用 rgraph 创建、修改和跟踪实验进度。
+保留已有内容；指引尚不存在时追加，不重复写入。
 默认输出初始化路径；--json 返回 database、schema_version。
 
 示例：

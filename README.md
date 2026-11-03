@@ -22,6 +22,8 @@ rgraph --version
 
 Each database file holds one graph. By default, commands use `research.db` in the current directory. Use a separate database for an independent research project.
 
+`rgraph init` also writes `AGENT.md` beside the database, instructing agents to use rgraph to create, modify, and track experiments. Existing content is preserved; the instructions are appended only if not already present.
+
 ```bash
 rgraph init
 rgraph add --file plan.example.yaml

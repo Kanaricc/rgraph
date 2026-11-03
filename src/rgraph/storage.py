@@ -27,6 +27,30 @@ NODE_FIELDS = ("id", "text", "conclusion", "code_dir", "value", "created_at", "u
 EDGE_FIELDS = ("parent_id", "child_id", "observation", "action", "created_at", "updated_at")
 SCHEMA_VERSION = 4
 
+AGENT_INSTRUCTIONS = """## Experiment tracking with rgraph
+
+Use `rgraph` to create, modify, and track experiment plans and progress.
+Run commands from the research directory; use `--db PATH` to select a database
+other than `research.db`. Read `rgraph --help` and command-specific help before use.
+
+- Before starting an experiment, record its complete YAML plan with
+  `rgraph add --file plan.yaml`. Use `rgraph edit ID --file plan.yaml` to revise it.
+- Track progress with `rgraph list`, `rgraph show ID`, and `rgraph tree`.
+  Keep execution logs, intermediate progress, and detailed results in the
+  experiment directory, and register it with `rgraph set-code-dir ID PATH`.
+  Include a root `README.md` explaining how to reproduce the experiment.
+- Only after the experiment finishes, record a concrete conclusion based on
+  actual results with `rgraph set-conclusion ID --file conclusion.md`.
+  Leave the conclusion unset while work is in progress; never use placeholders.
+- Create follow-up experiments with
+  `rgraph add --parent ID --observation TEXT --action TEXT --file next-plan.yaml`.
+  The parent must have a conclusion and
+  an experiment directory containing a root README. Record what was observed
+  and what the next experiment will change; use `rgraph edge edit` to revise them.
+- Value scores are assigned by the user. Agents must not invoke `set-value`
+  or `clear-value`.
+"""
+
 
 class Graph:
     @staticmethod
@@ -80,6 +104,12 @@ class Graph:
                 BEGIN SELECT RAISE(ABORT, 'self link'); END;
                 PRAGMA user_version = 4;
             """)
+            agent_path = target.parent / "AGENT.md"
+            content = agent_path.read_text(encoding="utf-8") if agent_path.exists() else ""
+            if AGENT_INSTRUCTIONS not in content:
+                separator = "\n\n" if content else ""
+                with agent_path.open("a", encoding="utf-8") as agent_file:
+                    agent_file.write(separator + AGENT_INSTRUCTIONS)
         except BaseException:
             await Tortoise.close_connections()
             target.unlink()
