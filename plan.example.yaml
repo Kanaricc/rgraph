@@ -1,4 +1,4 @@
-plan_version: 1
+plan_version: 2
 title: 扩大候选集能否改善检索召回率
 
 question: |
@@ -26,16 +26,22 @@ decision:
     缺少有效运行，或两组数据、环境、评测口径不一致，导致结果无法用于判断假设。
 
 execution:
-  environment: |
-    - 机器：gpu-worker-01；使用 GPU 0，最多占用 24 GiB 显存、8 个 CPU 核和 32 GiB 内存。
-    - 只读目录：gpu-worker-01:/data/retrieval-eval/v2，用于读取评测查询和相关性标注。
-    - 只读目录：gpu-worker-01:/data/models/retrieval-model-v3，用于读取模型权重与配置。
-    - 读写目录：gpu-worker-01:/workspace/experiments/candidate-count，用于保存实验代码、依赖环境、缓存、临时文件、日志和结果。
-    - 软件环境：在上述读写目录内使用依赖锁文件创建 Python 环境；两组使用相同的软件版本、模型权重和驱动环境。
+  environment:
+    - machine: gpu-worker-01
+      gpu:
+        - index: 0
+          memory_gib: 24
+      cpu_cores: 8
+      memory_gib: 32
+      read_only:
+        - /data/retrieval-eval/v2
+        - /data/models/retrieval-model-v3
+      read_write:
+        - /workspace/experiments/candidate-count
 
   steps: |
     1. 检查机器资源和目录权限，确认数据及模型版本。
-    2. 准备依赖环境，校验查询 ID 和相关性标注。
+    2. 在声明的读写目录内使用依赖锁文件创建 Python 环境，两组使用相同的软件版本、模型权重和驱动环境；校验查询 ID 和相关性标注。
     3. 按 seed 配对运行两组实验，记录配置、逐查询指标及延迟。
     4. 检查运行是否完整，汇总各轮指标、平均差值和延迟增幅。
     5. 按 decision 判断结果，整理复现说明和最终产物。

@@ -92,7 +92,7 @@ rgraph show 2 --text-only > node.yaml
 Use [plan.example.yaml](plan.example.yaml) as a starting point. Each node text must contain one YAML document with exactly these fields:
 
 ```yaml
-plan_version: 1
+plan_version: 2
 title: Experiment title
 question: |
   The specific question this experiment will answer.
@@ -110,13 +110,22 @@ decision:
   inconclusive: |
     Conditions under which the evidence is insufficient to decide.
 execution:
-  environment: |
-    - Identify each machine and the CPU, GPU, memory, or other resources to use.
-    - List read-only files and directories with their machine and absolute path.
-    - List read-write files and directories, including environments, caches, and temporary files.
-    - Describe the software environment.
+  environment:
+    - machine: gpu-worker-01
+      gpu:
+        - index: 0
+          memory_gib: 24
+      cpu_cores: 8
+      memory_gib: 32
+      read_only:
+        - /data/evaluation
+        - /models/embedding
+      read_write:
+        - /workspace/experiments/baseline
+        - /workspace/cache
+        - /workspace/tmp
   steps: |
-    Describe the execution steps in order.
+    Describe software preparation and execution steps in order.
   prohibited_actions: |
     Describe prohibited actions, or explicitly state that there are no additional prohibitions.
   artifacts: |
@@ -125,9 +134,24 @@ execution:
     Describe completion criteria, resource limits, and conditions requiring an early stop.
 ```
 
-All fields are required, and unknown or duplicate fields are rejected at every object level. `plan_version` must be the integer `1`; all other leaf values must be nonempty strings after whitespace is stripped. In particular, `hypothesis`, `design`, `evaluation`, and every field under `execution` are plain text, not nested objects or YAML lists. Use `|` to preserve intentional line breaks without wrapping sentences to a fixed width.
+All fields are required, and unknown or duplicate fields are rejected at every object level. `plan_version` must be the integer `2`. Outside `environment`, all other leaf values must be nonempty strings after whitespace is stripped. Use `|` to preserve intentional line breaks without wrapping sentences to a fixed width.
 
-Validation checks structure and types, not whether the prose describes a sound experiment or whether declared permissions are obeyed. The plan does not replace the separate `conclusion` and `code_dir` fields. Existing stored text remains readable; any subsequent text write must pass validation. Database schema version remains 4.
+`environment` is a list of machine objects with exactly the six fields shown above:
+
+| Field | Required value |
+| --- | --- |
+| `machine` | Nonempty identifier, unique within the plan: `local`, a hostname, SSH alias, or client ID. |
+| `gpu` | List of objects with `index` (nonnegative integer, unique per machine) and `memory_gib` (positive number). Use machine device indices, not process-remapped indices. |
+| `cpu_cores` | Nonnegative integer CPU core limit; no CPU affinity is specified. |
+| `memory_gib` | Nonnegative total host memory limit across all experiment processes, excluding GPU memory. |
+| `read_only` | List of read-only file or directory paths on this machine. |
+| `read_write` | List of read-write file or directory paths on this machine, including environments, caches, and temporary files. |
+
+Memory values are finite numbers in GiB; fractions are allowed. Booleans and numeric strings are rejected. Resource amounts are usage limits, not reservations. Use `[]` or `0` for unused resources. `environment: []` is allowed, but a machine with all five resource fields empty or zero is rejected. No cross-resource feasibility checks are performed. Software preparation belongs in `steps`; resource objects have no free-text description fields.
+
+Paths must be normalized POSIX absolute paths without a machine prefix, `~`, variables, wildcards, `.` or `..` components, repeated slashes, or trailing slashes except `/`. Directory declarations cover all descendants. Within a machine, paths cannot repeat or contain one another, including across the two permission lists: read-only `/data` and read-write `/data/output` conflict. Declare narrower input paths instead. `/data/a` and `/data/abc` do not conflict. Paths may refer to files or directories that do not exist yet.
+
+Validation checks declarations, not whether the experiment is scientifically sound or executable. It does not connect to machines, check path existence, resolve symbolic links, allocate resources, or enforce permissions. Invalid plans return `invalid_plan` (exit code 2) with the offending field or conflicting paths. The plan does not replace the separate `conclusion` and `code_dir` fields. Existing stored text remains readable without automatic conversion; new plans and subsequent text edits must use version 2. Original YAML formatting and existing display/export behavior are preserved. Database schema version remains 4.
 
 ### Conclusions and experiment code directories
 

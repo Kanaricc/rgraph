@@ -17,12 +17,22 @@ OVERVIEW = """用 SQLite 保存研究 DAG，通过文本节点和带 observation
 
 必须遵守：
   * text 必须是单个 YAML 实验计划；完整示例见项目 plan.example.yaml。
-  * 必填字段：plan_version=整数 1，title、question、hypothesis、design、evaluation；
+  * 必填字段：plan_version=整数 2，title、question、hypothesis、design、evaluation；
     decision 包含 supported、not_supported、inconclusive；
     execution 包含 environment、steps、prohibited_actions、artifacts、stop_condition。
-  * 除版本外所有叶子字段必须是非空白字符串；禁止未知字段和重复字段。
-    environment 用文本逐条声明机器资源及文件（夹）的只读、读写权限。
-    add/edit 校验完整计划，失败为 invalid_plan（退出码 2）；计划修订使用 edit 整体替换。
+  * 除版本和 environment 外，所有叶子字段必须是非空白字符串；禁止未知字段和重复字段。
+    environment 是机器对象列表，每项必填 machine、gpu、cpu_cores、memory_gib、read_only、read_write。
+    machine 为非空且唯一的机器标识（local、主机名、SSH 别名或 client ID），工具不连接机器。
+    gpu 为列表，每项必填 index（机器上的非负整数设备编号，同机唯一）、memory_gib（正数显存上限）。
+    cpu_cores 为非负整数核数上限；memory_gib 为非负数，表示所有实验进程合计主存上限。
+    主存、显存固定使用 GiB，允许有限小数；不接受布尔值或数字字符串。
+    read_only/read_write 是文件或目录的规整 POSIX 绝对路径列表，目录覆盖全部子路径。
+    不得使用 ~、变量、通配符、相对路径、.、..、重复斜杠或非根目录尾斜杠；同机路径不得重复或相互包含。
+    不使用的资源填 [] 或 0；允许 environment: []，不允许所有资源均为空的机器条目。
+    软件准备写入 steps；资源声明不含自由文本说明字段，不检查资源间可执行性。
+    仅校验声明，不连接机器、不检查路径存在性、不解析符号链接、不执行资源或权限限制。
+    add/edit 必须提交版本 2 的完整计划，失败为 invalid_plan（退出码 2）；旧计划仍可读取。
+    计划修订使用 edit 整体替换，保留原始 YAML，不自动转换旧计划。
   * conclusion 只能在实验结束后设置为基于实际结果的具体结论，禁止填写占位信息
     （如“待实验”“待补充”“TODO”）；实验未结束时保持未设置。
   * 已有子节点的父节点禁止清空 conclusion；可替换为新的具体结论。
